@@ -839,11 +839,9 @@ namespace League.model
         /// <returns></returns>
         public async Task<Image> GetItemIconAsync(string iconPath)
         {
-            // 确保缓存目录存在
             string cacheDir = Path.Combine(Application.StartupPath, "Assets", "item");
             Directory.CreateDirectory(cacheDir);
 
-            // 从路径中提取文件名
             string fileName = Path.GetFileName(iconPath);
             if (string.IsNullOrEmpty(fileName))
             {
@@ -851,10 +849,8 @@ namespace League.model
                 return null;
             }
 
-            // 构建本地缓存路径
             string cachePath = Path.Combine(cacheDir, fileName);
 
-            // 1. 首先尝试从本地缓存加载
             if (File.Exists(cachePath))
             {
                 try
@@ -862,42 +858,45 @@ namespace League.model
                     using (var stream = File.OpenRead(cachePath))
                     {
                         var image = Image.FromStream(stream);
-                        //Debug.WriteLine($"从本地缓存加载装备图标: {fileName}");
-                        return (Image)image.Clone();
+                        return (Image)image.Clone(); // clone避免流关闭后图片失效
                     }
                 }
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"本地缓存加载失败: {ex.Message}");
-                    // 如果缓存文件损坏，继续从网络获取
                 }
             }
 
-            // 2. 本地没有则从LCU API获取
             try
             {
-                var response = await _client.GetAsync(iconPath);
+                var response = await _client.GetAsync(iconPath).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
                     Debug.WriteLine($"装备图标获取失败: {iconPath} 状态码: {response.StatusCode}");
                     return null;
                 }
 
-                using (var stream = await response.Content.ReadAsStreamAsync())
+                using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                 {
-                    var image = Image.FromStream(stream);
-                    Debug.WriteLine($"成功从API读取装备图标: {fileName}");
-
-                    // 3. 将获取的图片保存到本地缓存
+                    Image image;
                     try
                     {
-                        await SaveItemImageToCacheAsync(image, cachePath);
+                        image = Image.FromStream(stream);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"图片流转换失败: {ex.Message}");
+                        return null;
+                    }
+
+                    try
+                    {
+                        await SaveItemImageToCacheAsync(image, cachePath).ConfigureAwait(false);
                         Debug.WriteLine($"已缓存装备图标: {fileName}");
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"装备图标缓存保存失败: {ex.Message}");
-                        // 即使缓存失败也返回图片
+                        Debug.WriteLine($"缓存图片失败: {ex.Message}");
                     }
 
                     return image;
@@ -909,6 +908,79 @@ namespace League.model
                 return null;
             }
         }
+
+        //public async Task<Image> GetItemIconAsync(string iconPath)
+        //{
+        //    // 确保缓存目录存在
+        //    string cacheDir = Path.Combine(Application.StartupPath, "Assets", "item");
+        //    Directory.CreateDirectory(cacheDir);
+
+        //    // 从路径中提取文件名
+        //    string fileName = Path.GetFileName(iconPath);
+        //    if (string.IsNullOrEmpty(fileName))
+        //    {
+        //        Debug.WriteLine($"无效的装备图标路径: {iconPath}");
+        //        return null;
+        //    }
+
+        //    // 构建本地缓存路径
+        //    string cachePath = Path.Combine(cacheDir, fileName);
+
+        //    // 1. 首先尝试从本地缓存加载
+        //    if (File.Exists(cachePath))
+        //    {
+        //        try
+        //        {
+        //            using (var stream = File.OpenRead(cachePath))
+        //            {
+        //                var image = Image.FromStream(stream);
+        //                //Debug.WriteLine($"从本地缓存加载装备图标: {fileName}");
+        //                return (Image)image.Clone();
+        //            }
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            Debug.WriteLine($"本地缓存加载失败: {ex.Message}");
+        //            // 如果缓存文件损坏，继续从网络获取
+        //        }
+        //    }
+
+        //    // 2. 本地没有则从LCU API获取
+        //    try
+        //    {
+        //        var response = await _client.GetAsync(iconPath);
+        //        if (!response.IsSuccessStatusCode)
+        //        {
+        //            Debug.WriteLine($"装备图标获取失败: {iconPath} 状态码: {response.StatusCode}");
+        //            return null;
+        //        }
+
+        //        using (var stream = await response.Content.ReadAsStreamAsync())
+        //        {
+        //            var image = Image.FromStream(stream);
+        //            Debug.WriteLine($"成功从API读取装备图标: {fileName}");
+
+        //            // 3. 将获取的图片保存到本地缓存
+        //            try
+        //            {
+        //                await SaveItemImageToCacheAsync(image, cachePath);
+        //                Debug.WriteLine($"已缓存装备图标: {fileName}");
+        //            }
+        //            catch (Exception ex)
+        //            {
+        //                Debug.WriteLine($"装备图标缓存保存失败: {ex.Message}");
+        //                // 即使缓存失败也返回图片
+        //            }
+
+        //            return image;
+        //        }
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        Debug.WriteLine($"装备图标加载异常: {ex}");
+        //        return null;
+        //    }
+        //}
 
         private async Task SaveItemImageToCacheAsync(Image image, string cachePath)
         {

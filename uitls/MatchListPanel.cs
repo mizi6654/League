@@ -143,15 +143,32 @@ namespace League
                 }
 
                 // 根据索引决定绘制主系还是副系符文
+                //Image runeImage = null;
+                //if (i < 4 && MatchInfo.PrimaryRunes != null && i < MatchInfo.PrimaryRunes.Length)
+                //{
+                //    runeImage = MatchInfo.PrimaryRunes[i].Icon; // 前4个是主系符文
+                //}
+                //else if (i >= 4 && MatchInfo.SecondaryRunes != null && (i - 4) < MatchInfo.SecondaryRunes.Length)
+                //{
+                //    runeImage = MatchInfo.SecondaryRunes[i - 4].Icon; // 后2个是副系符文
+                //}
                 Image runeImage = null;
-                if (i < 4 && MatchInfo.PrimaryRunes != null && i < MatchInfo.PrimaryRunes.Length)
+
+                if (i < 4
+                    && MatchInfo.PrimaryRunes != null
+                    && i < MatchInfo.PrimaryRunes.Length
+                    && MatchInfo.PrimaryRunes[i] != null)
                 {
-                    runeImage = MatchInfo.PrimaryRunes[i].Icon; // 前4个是主系符文
+                    runeImage = MatchInfo.PrimaryRunes[i].Icon;
                 }
-                else if (i >= 4 && MatchInfo.SecondaryRunes != null && (i - 4) < MatchInfo.SecondaryRunes.Length)
+                else if (i >= 4
+                    && MatchInfo.SecondaryRunes != null
+                    && (i - 4) < MatchInfo.SecondaryRunes.Length
+                    && MatchInfo.SecondaryRunes[i - 4] != null)
                 {
-                    runeImage = MatchInfo.SecondaryRunes[i - 4].Icon; // 后2个是副系符文
+                    runeImage = MatchInfo.SecondaryRunes[i - 4].Icon;
                 }
+
 
                 // 如果有符文图片则绘制
                 if (runeImage != null)

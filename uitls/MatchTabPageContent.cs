@@ -174,49 +174,94 @@ namespace League.uitls
 
         private async Task UpdateMatchListInternal(JArray matches, CancellationToken token)
         {
-            // 确保始终在UI线程执行
-            if (flowLayoutPanelRight.InvokeRequired)
+            // step 1: 在后台线程处理耗时工作
+            var panels = await Task.Run(async () =>
             {
-                await flowLayoutPanelRight.Invoke(async () =>
-                {
-                    await UpdateMatchListInternal(matches, token);
-                });
-                return;
-            }
+                var panelList = new List<Panel>();
 
-            flowLayoutPanelRight.SuspendLayout();
-            flowLayoutPanelRight.Controls.Clear();
-
-            try
-            {
-                // 此处无需再检查空数据，因为外层已处理
-                var panelTasks = matches.Cast<JObject>()
-                    .Select(async match =>
-                    {
-                        if (token.IsCancellationRequested) return null;
-                        return await ParsePanelRequested?.Invoke(match, _puuid);
-                    })
+                var tasks = matches.Cast<JObject>()
+                    .Select(match => ParsePanelRequested?.Invoke(match, _puuid))
                     .ToList();
 
-                var panels = new List<Panel>();
-                foreach (var task in panelTasks)
+                foreach (var t in tasks)
                 {
                     if (token.IsCancellationRequested) break;
-                    var panel = await task;
-                    if (panel != null) panels.Add(panel);
+
+                    var panel = await t.ConfigureAwait(false);
+                    if (panel != null) panelList.Add(panel);
                 }
 
-                if (!token.IsCancellationRequested)
+                return panelList;
+            });
+
+            // step 2: 回到 UI 线程
+            if (!token.IsCancellationRequested)
+            {
+                if (flowLayoutPanelRight.InvokeRequired)
                 {
+                    flowLayoutPanelRight.Invoke(new Action(() =>
+                    {
+                        flowLayoutPanelRight.SuspendLayout();
+                        flowLayoutPanelRight.Controls.Clear();
+                        flowLayoutPanelRight.Controls.AddRange(panels.ToArray());
+                        flowLayoutPanelRight.ResumeLayout(true);
+                    }));
+                }
+                else
+                {
+                    flowLayoutPanelRight.SuspendLayout();
+                    flowLayoutPanelRight.Controls.Clear();
                     flowLayoutPanelRight.Controls.AddRange(panels.ToArray());
+                    flowLayoutPanelRight.ResumeLayout(true);
                 }
             }
-            finally
-            {
-                flowLayoutPanelRight.ResumeLayout(true);
-                flowLayoutPanelRight.AutoScrollPosition = new Point(0, 0);
-            }
         }
+
+        //private async Task UpdateMatchListInternal(JArray matches, CancellationToken token)
+        //{
+        //    // 确保始终在UI线程执行
+        //    if (flowLayoutPanelRight.InvokeRequired)
+        //    {
+        //        await flowLayoutPanelRight.Invoke(async () =>
+        //        {
+        //            await UpdateMatchListInternal(matches, token);
+        //        });
+        //        return;
+        //    }
+
+        //    flowLayoutPanelRight.SuspendLayout();
+        //    flowLayoutPanelRight.Controls.Clear();
+
+        //    try
+        //    {
+        //        // 此处无需再检查空数据，因为外层已处理
+        //        var panelTasks = matches.Cast<JObject>()
+        //            .Select(async match =>
+        //            {
+        //                if (token.IsCancellationRequested) return null;
+        //                return await ParsePanelRequested?.Invoke(match, _puuid);
+        //            })
+        //            .ToList();
+
+        //        var panels = new List<Panel>();
+        //        foreach (var task in panelTasks)
+        //        {
+        //            if (token.IsCancellationRequested) break;
+        //            var panel = await task;
+        //            if (panel != null) panels.Add(panel);
+        //        }
+
+        //        if (!token.IsCancellationRequested)
+        //        {
+        //            flowLayoutPanelRight.Controls.AddRange(panels.ToArray());
+        //        }
+        //    }
+        //    finally
+        //    {
+        //        flowLayoutPanelRight.ResumeLayout(true);
+        //        flowLayoutPanelRight.AutoScrollPosition = new Point(0, 0);
+        //    }
+        //}
 
         public async Task InitiaRank(string fullName, string profileIconId, string summonerLevel, string privacy, Dictionary<string, RankedStats> rankedStats)
         {
