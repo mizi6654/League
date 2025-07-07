@@ -143,15 +143,6 @@ namespace League
                 }
 
                 // 根据索引决定绘制主系还是副系符文
-                //Image runeImage = null;
-                //if (i < 4 && MatchInfo.PrimaryRunes != null && i < MatchInfo.PrimaryRunes.Length)
-                //{
-                //    runeImage = MatchInfo.PrimaryRunes[i].Icon; // 前4个是主系符文
-                //}
-                //else if (i >= 4 && MatchInfo.SecondaryRunes != null && (i - 4) < MatchInfo.SecondaryRunes.Length)
-                //{
-                //    runeImage = MatchInfo.SecondaryRunes[i - 4].Icon; // 后2个是副系符文
-                //}
                 Image runeImage = null;
 
                 if (i < 4

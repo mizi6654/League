@@ -9,6 +9,7 @@ using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using League.model;
 using Newtonsoft.Json.Linq;
 
 namespace League
@@ -114,6 +115,26 @@ namespace League
             catch (Exception ex)
             {
                 txt.Text = "解析失败: " + ex.Message;
+            }
+        }
+
+        private void button2_Click(object sender, EventArgs e)
+        {
+            LOLHelper helper = new LOLHelper();
+
+            string exePath = helper.GetLOLLoginExePath();
+            tbPath.Text = exePath;
+
+            if (!string.IsNullOrEmpty(exePath))
+            {
+                Console.WriteLine("找到 LOL 登录程序：" + exePath);
+
+                // 启动
+                helper.StartLOLLoginProgram(exePath);
+            }
+            else
+            {
+                Console.WriteLine("未检测到 LOL 登录程序！");
             }
         }
     }

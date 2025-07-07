@@ -28,10 +28,23 @@ namespace League.uitls
         {
             //lblPlayerName 是一个LinkLabel控件
             lblPlayerName.Text = playerName;
+
             // 设置同组队玩家颜色
             lblPlayerName.LinkColor = nameColor;
             lblPlayerName.VisitedLinkColor = nameColor;
             lblPlayerName.ActiveLinkColor = nameColor;
+
+            // 设置加粗字体
+            // 最好先保存原来的字体信息
+            var oldFont = lblPlayerName.Font;
+
+            // 重新创建粗体字体
+            lblPlayerName.Font = new Font(
+                oldFont.FontFamily,
+                oldFont.Size,
+                FontStyle.Bold
+            );
+
             lblPlayerName.BorderStyle = BorderStyle.FixedSingle;
 
             lblSoloRank.Text = $"{soloRank}";

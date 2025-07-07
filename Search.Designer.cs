@@ -31,11 +31,13 @@
             button1 = new Button();
             closableTabControl1 = new League.uitls.ClosableTabControl();
             tabPage1 = new TabPage();
+            txtResult = new TextBox();
             tabPage2 = new TabPage();
             comboBox1 = new ComboBox();
             tabPage3 = new TabPage();
             checkBox1 = new CheckBox();
-            txtResult = new TextBox();
+            button2 = new Button();
+            tbPath = new TextBox();
             closableTabControl1.SuspendLayout();
             tabPage1.SuspendLayout();
             tabPage2.SuspendLayout();
@@ -76,6 +78,14 @@
             tabPage1.Text = "tabPage1";
             tabPage1.UseVisualStyleBackColor = true;
             // 
+            // txtResult
+            // 
+            txtResult.Location = new Point(26, 29);
+            txtResult.Multiline = true;
+            txtResult.Name = "txtResult";
+            txtResult.Size = new Size(481, 336);
+            txtResult.TabIndex = 0;
+            // 
             // tabPage2
             // 
             tabPage2.Controls.Add(comboBox1);
@@ -115,19 +125,30 @@
             checkBox1.Text = "checkBox1";
             checkBox1.UseVisualStyleBackColor = true;
             // 
-            // txtResult
+            // button2
             // 
-            txtResult.Location = new Point(26, 29);
-            txtResult.Multiline = true;
-            txtResult.Name = "txtResult";
-            txtResult.Size = new Size(481, 336);
-            txtResult.TabIndex = 0;
+            button2.Location = new Point(736, 92);
+            button2.Name = "button2";
+            button2.Size = new Size(75, 23);
+            button2.TabIndex = 3;
+            button2.Text = "登录";
+            button2.UseVisualStyleBackColor = true;
+            button2.Click += button2_Click;
+            // 
+            // tbPath
+            // 
+            tbPath.Location = new Point(555, 121);
+            tbPath.Name = "tbPath";
+            tbPath.Size = new Size(430, 23);
+            tbPath.TabIndex = 4;
             // 
             // Search
             // 
             AutoScaleDimensions = new SizeF(7F, 17F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(800, 450);
+            ClientSize = new Size(1126, 450);
+            Controls.Add(tbPath);
+            Controls.Add(button2);
             Controls.Add(closableTabControl1);
             Controls.Add(button1);
             Name = "Search";
@@ -139,6 +160,7 @@
             tabPage3.ResumeLayout(false);
             tabPage3.PerformLayout();
             ResumeLayout(false);
+            PerformLayout();
         }
 
         #endregion
@@ -151,5 +173,7 @@
         private TabPage tabPage3;
         private CheckBox checkBox1;
         private TextBox txtResult;
+        private Button button2;
+        private TextBox tbPath;
     }
 }

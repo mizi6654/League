@@ -217,52 +217,6 @@ namespace League.uitls
             }
         }
 
-        //private async Task UpdateMatchListInternal(JArray matches, CancellationToken token)
-        //{
-        //    // 确保始终在UI线程执行
-        //    if (flowLayoutPanelRight.InvokeRequired)
-        //    {
-        //        await flowLayoutPanelRight.Invoke(async () =>
-        //        {
-        //            await UpdateMatchListInternal(matches, token);
-        //        });
-        //        return;
-        //    }
-
-        //    flowLayoutPanelRight.SuspendLayout();
-        //    flowLayoutPanelRight.Controls.Clear();
-
-        //    try
-        //    {
-        //        // 此处无需再检查空数据，因为外层已处理
-        //        var panelTasks = matches.Cast<JObject>()
-        //            .Select(async match =>
-        //            {
-        //                if (token.IsCancellationRequested) return null;
-        //                return await ParsePanelRequested?.Invoke(match, _puuid);
-        //            })
-        //            .ToList();
-
-        //        var panels = new List<Panel>();
-        //        foreach (var task in panelTasks)
-        //        {
-        //            if (token.IsCancellationRequested) break;
-        //            var panel = await task;
-        //            if (panel != null) panels.Add(panel);
-        //        }
-
-        //        if (!token.IsCancellationRequested)
-        //        {
-        //            flowLayoutPanelRight.Controls.AddRange(panels.ToArray());
-        //        }
-        //    }
-        //    finally
-        //    {
-        //        flowLayoutPanelRight.ResumeLayout(true);
-        //        flowLayoutPanelRight.AutoScrollPosition = new Point(0, 0);
-        //    }
-        //}
-
         public async Task InitiaRank(string fullName, string profileIconId, string summonerLevel, string privacy, Dictionary<string, RankedStats> rankedStats)
         {
             linkGameName.Text = fullName;
@@ -280,7 +234,8 @@ namespace League.uitls
                 lblSoloGames.Text = $"{soloStats.TotalGames} 场";    //场次
                 lblSoloWins.Text = $"{soloStats.Wins}场";  //胜场
                 lblSoloLosses.Text = $"{soloStats.Losses}场";  //负场
-                lblSoloWinRate.Text = $"{soloStats.WinRate}%";  //胜率
+                lblSoloWinRate.Text = $"{soloStats.WinRateDisplay}%";  //胜率
+                //lblSoloWinRate.Text = $"{soloStats.WinRate}%";  //胜率
                 lblSoloLeaguePoints.Text = $"{soloStats.LeaguePoints}点";  //胜点
             }
 
@@ -291,7 +246,8 @@ namespace League.uitls
                 lblFlexGames.Text = $"{flexStats.TotalGames} 场";    //场次
                 lblFlexWins.Text = $"{flexStats.Wins}场";  //胜场
                 lblFlexLosses.Text = $"{flexStats.Losses}场";  //负场
-                lblFlexWinRate.Text = $"{flexStats.WinRate}%";  //胜率
+                lblFlexWinRate.Text = $"{flexStats.WinRateDisplay}%";  //胜率胜率
+                //lblFlexWinRate.Text = $"{flexStats.WinRate}%";  //胜率胜率
                 lblFlexLeaguePoints.Text = $"{flexStats.LeaguePoints}点";  //胜点
             }
         }

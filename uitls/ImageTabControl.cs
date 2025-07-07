@@ -38,7 +38,9 @@ namespace League.uitls
 
             // 绘制分隔线
             DrawSeparatorLine(e.Graphics);
+
         }
+
 
         private void DrawTabImage(Graphics g, int index)
         {
@@ -51,22 +53,60 @@ namespace League.uitls
                 g.FillRectangle(brush, tabRect);
             }
 
+            // BorderStyle.FixedSingle → 黑色、1像素边框
+            //using (var pen = new Pen(Color.Lime, 1))
+            //{
+            //    g.DrawRectangle(pen, tabRect);
+            //}
+
             Image img = GetTabImage(TabPages[index]);
             if (img != null)
             {
-                Size imgSize = _imageSize;
-                Rectangle imgRect = new Rectangle(
-                    tabRect.X + (tabRect.Width - imgSize.Width) / 2,
-                    tabRect.Y + (tabRect.Height - imgSize.Height) / 2,
-                    imgSize.Width,
-                    imgSize.Height);
+                float ratioX = (float)tabRect.Width / img.Width;
+                float ratioY = (float)tabRect.Height / img.Height;
+
+                float ratio = Math.Min(ratioX, ratioY);
+
+                int newWidth = (int)(img.Width * ratio);
+                int newHeight = (int)(img.Height * ratio);
+
+                int offsetX = tabRect.X + (tabRect.Width - newWidth) / 2;
+                int offsetY = tabRect.Y + (tabRect.Height - newHeight) / 2;
+
+                Rectangle imgRect = new Rectangle(offsetX, offsetY, newWidth, newHeight);
 
                 g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
 
                 g.DrawImage(img, imgRect);
             }
+
+            // 加灰色蒙层
+            if (!isSelected)
+            {
+                using (var overlay = new SolidBrush(Color.FromArgb(120, Color.Gray)))
+                {
+                    g.FillRectangle(overlay, tabRect);
+                }
+            }
+
+            // 选中 tab 可以画高亮边框
+            if (isSelected)
+            {
+                using (var pen = new Pen(Color.DodgerBlue, 1))
+                {
+                    g.DrawRectangle(pen, tabRect);
+                }
+            }
+            else
+            {
+                using (var pen = new Pen(Color.DarkGray, 1))
+                {
+                    g.DrawRectangle(pen, tabRect);
+                }
+            }
         }
+
 
         private Image GetTabImage(TabPage page)
         {

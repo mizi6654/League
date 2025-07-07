@@ -14,7 +14,6 @@
 
         // 读取 MatchKeys 作为 Matches
         public IEnumerable<string> Matches => MatchKeys;
-        //public List<string> Matches { get; set; } = new List<string>();
 
         public string PartyId { get; set; } // 加上这个字段用于判断组队身份
     }

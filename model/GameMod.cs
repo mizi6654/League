@@ -24,7 +24,7 @@
             //return $"未知模式{queueId}|{gameMode}";
             // 明确显示 null 值和格式
             //return $"未知模式（QueueID={queueId?.ToString() ?? "null"} | GameMode={gameMode ?? "null"}）";
-            return $"未知模式({queueId?.ToString()})";
+            return $"未知({queueId?.ToString()})";
         }
 
         // 模式映射表（键为 queueId 或 gameMode 的字符串形式）

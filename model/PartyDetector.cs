@@ -5,16 +5,8 @@ public class PartyDetector
     private readonly int _matchThreshold;
     private readonly Color[] _colorPool =
     {
-        Color.FromArgb(255, 99, 132),    // 红
-        Color.FromArgb(54, 162, 235),    // 蓝
-        Color.FromArgb(255, 206, 86),    // 黄
-        Color.FromArgb(75, 192, 192),    // 青
-        Color.FromArgb(153, 102, 255),   // 紫
-        Color.FromArgb(255, 159, 64),    // 橙
-        Color.FromArgb(0, 200, 83),      // 绿
-        Color.FromArgb(255, 0, 128),     // 粉
-        Color.FromArgb(0, 255, 255),     // 天蓝
-        Color.FromArgb(128, 0, 255),     // 深紫
+        Color.FromArgb(255, 0, 0),       // 红
+        Color.FromArgb(0, 0, 255),       // 深蓝
     };
 
     private Dictionary<string, string> parentMap = new Dictionary<string, string>();

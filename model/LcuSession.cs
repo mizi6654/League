@@ -40,84 +40,96 @@ namespace League.model
         /// <returns>初始化成功返回 true，失败返回 false。</returns>
         public async Task<bool> InitializeAsync()
         {
-            // 获取 LeagueClientUx 进程
-            var process = Process.GetProcessesByName("LeagueClientUx").FirstOrDefault();
-            if (process == null)
+            const int maxRetries = 10;
+            const int delayMs = 1000;
+
+            string port = null;
+            string token = null;
+
+            for (int i = 0; i < maxRetries; i++)
             {
-                Debug.WriteLine("未找到 LeagueClientUx 进程");
+                var proc = Process.GetProcessesByName("LeagueClientUx").FirstOrDefault();
+                if (proc != null)
+                {
+                    string cmdLine = GetCommandLine(proc);
+
+                    port = ExtractArgument(cmdLine, "--app-port=");
+                    token = ExtractArgument(cmdLine, "--remoting-auth-token=");
+
+                    if (!string.IsNullOrEmpty(port))
+                        port = port.Trim().Trim('"', '\'', ' ', '\r', '\n');
+
+                    if (!string.IsNullOrEmpty(token))
+                        token = token.Trim().Trim('"', '\'', ' ', '\r', '\n');
+
+                    if (!int.TryParse(port, out int portNumber) || portNumber < 1 || portNumber > 65535)
+                    {
+                        Debug.WriteLine($"[LCU] 提取到的端口不合法: {port}");
+                        return false;
+                    }
+
+                    if (!string.IsNullOrEmpty(port) && !string.IsNullOrEmpty(token))
+                    {
+                        Debug.WriteLine($"[LCU] 找到参数 → Port: {port}, Token: {token}");
+                        break;
+                    }
+                    else
+                    {
+                        Debug.WriteLine("[LCU] LeagueClientUx 启动了，但参数暂时为空，等待重试...");
+                    }
+                }
+                else
+                {
+                    Debug.WriteLine("[LCU] LeagueClientUx 尚未启动，等待...");
+                }
+
+                await Task.Delay(delayMs);
+            }
+
+            if (string.IsNullOrEmpty(port) || string.IsNullOrEmpty(token))
+            {
+                Debug.WriteLine("[LCU] 多次重试后仍未获取到 LCU 参数");
                 return false;
             }
 
-            // 获取命令行参数
-            string cmdLine = GetCommandLine(process);
-            _port = ExtractArgument(cmdLine, "--app-port=");
-            _token = ExtractArgument(cmdLine, "--remoting-auth-token=");
+            // 保存到字段
+            _port = port;
+            _token = token;
 
-            // 清理隐藏字符
-            _port = _port?.Trim().Trim('"', '\'', ' ', '\r', '\n');
-            _token = _token?.Trim().Trim('"', '\'', ' ', '\r', '\n');
+            // 调试输出
+            Debug.WriteLine($"Port: {port}");
+            Debug.WriteLine($"Token: {token}");
+            Debug.WriteLine($"Authorization: Basic {Convert.ToBase64String(Encoding.ASCII.GetBytes($"riot:{token}"))}");
 
-            if (string.IsNullOrEmpty(_port) || !int.TryParse(_port, out int port) || port < 10000 || port > 65535)
-            {
-                Debug.WriteLine($"无效的端口号：{_port}");
-                return false;
-            }
-
-            if (string.IsNullOrEmpty(_token))
-            {
-                Debug.WriteLine("未能提取Token");
-                return false;
-            }
-
-            // 调试输出关键信息
-            Debug.WriteLine($"Port: {port}, Token: {_token}");
-            Debug.WriteLine($"Authorization: Basic {Convert.ToBase64String(Encoding.ASCII.GetBytes($"riot:{_token}"))}");
-
-            // 配置 HttpClientHandler 和代理
-            // 使用 SocketsHttpHandler 替代 HttpClientHandler
             var handler = new SocketsHttpHandler
             {
-                // 连接池配置
-                UseProxy = false,                    // 禁用代理（除非必须）
-
-                // 调整TCP参数
+                UseProxy = false,
                 PooledConnectionLifetime = Timeout.InfiniteTimeSpan,
                 PooledConnectionIdleTimeout = Timeout.InfiniteTimeSpan,
                 MaxConnectionsPerServer = 6,
-
-                // 启用HTTP/2 (需服务端支持)
                 EnableMultipleHttp2Connections = true,
-                ConnectTimeout = TimeSpan.FromSeconds(1),
-
-                // 关键管道化配置
+                ConnectTimeout = TimeSpan.FromSeconds(3),
                 UseCookies = false,
                 AllowAutoRedirect = false,
-
-                // SSL/TLS 配置（替代HttpClientHandler的ServerCertificateCustomValidationCallback）
                 SslOptions = new SslClientAuthenticationOptions
                 {
                     RemoteCertificateValidationCallback = (sender, cert, chain, errors) => true
                 }
             };
 
-            // 创建 HttpClient 实例
-            _client?.Dispose();  // 确保旧的 HttpClient 被释放
+            _client?.Dispose();
             _client = new HttpClient(handler)
             {
-                // 强制使用 HTTP/1.1 长连接（LCU 实测不支持 HTTP/2）
                 DefaultRequestVersion = HttpVersion.Version11,
                 DefaultVersionPolicy = HttpVersionPolicy.RequestVersionExact,
-                //Timeout = TimeSpan.FromSeconds(6)
-                Timeout = Timeout.InfiniteTimeSpan // 控制超时用 cts
+                Timeout = Timeout.InfiniteTimeSpan
             };
 
-            //设置 Authorization Header
             _client.DefaultRequestHeaders.Clear();
             _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
                 "Basic",
-                Convert.ToBase64String(Encoding.ASCII.GetBytes($"riot:{_token}"))
+                Convert.ToBase64String(Encoding.ASCII.GetBytes($"riot:{token}"))
             );
-            //模拟客户端的请求头15.9.677.0562
             _client.DefaultRequestHeaders.Add("User-Agent", "LeagueOfLegendsClient/15.9.677.0562 (CEF 91)");
             _client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             _client.DefaultRequestHeaders.CacheControl = new CacheControlHeaderValue
@@ -132,21 +144,31 @@ namespace League.model
 
             try
             {
-                // 测试连接获取当前用户
-                var response = await _client.GetAsync("lol-summoner/v1/current-summoner",
-                    HttpCompletionOption.ResponseHeadersRead);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var response = await _client.GetAsync(
+                    "lol-summoner/v1/current-summoner",
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cts.Token);
 
-                //var response = await _client.GetAsync($"lol-match-history/v1/products/lol/{puuid}/matches?begIndex=0&endIndex=1",
-                //    HttpCompletionOption.ResponseHeadersRead);
-                return response.IsSuccessStatusCode;
+
+                if (response.IsSuccessStatusCode)
+                {
+                    Debug.WriteLine("[LCU] 初始化成功，已连接 LCU API");
+                    return true;
+                }
+                else
+                {
+                    Debug.WriteLine($"[LCU] LCU 返回异常状态码: {response.StatusCode}");
+                }
+            }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
             }
             catch (Exception ex)
             {
-                /* 忽略错误 */
-                Debug.WriteLine($"心跳异常：{ex.ToString()}");
+                Debug.WriteLine($"[LCU] 其他异常: {ex}");
             }
-            // 启动心跳保持
-            //_ = Task.Run(KeepAliveAsync);
 
             return false;
         }
@@ -185,6 +207,11 @@ namespace League.model
                 var content = await response.Content.ReadAsStringAsync();
                 return JObject.Parse(content); // 返回完整 JObject
             }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
+                return null;
+            }
             catch (Exception ex)
             {
                 Debug.WriteLine($"查询异常：{ex}");
@@ -203,6 +230,11 @@ namespace League.model
 
                 var content = await response.Content.ReadAsStringAsync();
                 return JObject.Parse(content);
+            }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
+                return null;
             }
             catch (Exception ex)
             {
@@ -228,13 +260,13 @@ namespace League.model
 
                 return JObject.Parse(content);
             }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
+                return new JObject();
+            }
             catch (Exception ex)
             {
-                if (ex is TaskCanceledException)
-                {
-                    // 请求被取消或超时，不输出警告（可以选择静默处理）
-                    return new JObject(); // 返回空对象
-                }
                 Debug.WriteLine($"获取段位失败: {ex}");
                 return new JObject();
             }
@@ -316,72 +348,6 @@ namespace League.model
 
         /// <summary>
         /// 使用缓存接口快速拉取最近 20~50 场战绩（不支持分页）
-        /// </summary>
-        //public async Task<JArray> FetchLatestMatches(string puuid, bool isPreheat = false)
-        //{
-        //    int maxRetries = isPreheat ? 1 : 3;
-        //    int attempt = 0;
-
-        //    while (attempt < maxRetries)
-        //    {
-        //        attempt++;
-        //        CancellationTokenSource cts = null;
-
-        //        Debug.WriteLine($"[{puuid}] [Fast] 第{attempt}次尝试，等待信号量...");
-        //        await _concurrencySemaphore.WaitAsync();
-        //        Debug.WriteLine($"[{puuid}] [Fast] 获取到信号量，开始请求");
-
-        //        try
-        //        {
-        //            int timeoutSeconds = attempt == 1 ? 2 : 4;
-
-        //            cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
-
-        //            // 使用缓存接口（无分页参数）
-        //            string path = $"lol-match-history/v1/products/lol/{puuid}/matches";
-
-        //            var watch = Stopwatch.StartNew();
-        //            var response = await _client.GetAsync(path, cts.Token);
-        //            watch.Stop();
-
-        //            if (response.IsSuccessStatusCode)
-        //            {
-        //                string content = await response.Content.ReadAsStringAsync();
-        //                if (!isPreheat)
-        //                {
-        //                    UpdateResponseTimeHistory(watch.ElapsedMilliseconds);
-        //                    Debug.WriteLine($"[Fast请求成功] 默认返回 20~50 场，耗时: {watch.ElapsedMilliseconds}ms");
-        //                }
-
-        //                var json = JObject.Parse(content);
-        //                return json["games"]?["games"] as JArray;
-        //            }
-        //            else
-        //            {
-        //                Debug.WriteLine($"[Fast请求失败] {response.StatusCode}，接口为缓存接口");
-        //            }
-        //        }
-        //        catch (TaskCanceledException)
-        //        {
-        //            Debug.WriteLine($"[Fast请求超时] 第{attempt}次尝试（缓存接口）");
-        //            if (isPreheat) break;
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            Debug.WriteLine($"[Fast请求异常] {ex.Message}");
-        //        }
-        //        finally
-        //        {
-        //            _concurrencySemaphore.Release();
-        //            cts?.Dispose();
-        //        }
-        //    }
-
-        //    return null;
-        //}
-
-        /// <summary>
-        /// 使用缓存接口快速拉取最近 20~50 场战绩（不支持分页）
         ///— 一次请求，失败就返回 null，不重试
         /// </summary>
         public async Task<JArray> FetchLatestMatches(string puuid, bool isPreheat = false)
@@ -452,6 +418,11 @@ namespace League.model
                 var content = await response.Content.ReadAsStringAsync();
                 return JObject.Parse(content);
             }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
+                return null;
+            }
             catch (Exception ex)
             {
                 Debug.WriteLine($"获取完整对战信息失败：{ex.Message}");
@@ -477,6 +448,11 @@ namespace League.model
 
                 return JObject.Parse(content);
             }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
+                return new JObject();
+            }
             catch (Exception ex)
             {
                 Debug.WriteLine($"获取段位失败: {ex}");
@@ -500,29 +476,15 @@ namespace League.model
                 // 移除所有引号和空格
                 return rawContent.Trim().Trim('"');
             }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
+                return null;
+            }
             catch (Exception ex)
             {
                 Debug.WriteLine($"获取游戏阶段失败: {ex}");
                 return null;
-            }
-        }
-
-        public async Task<JObject> GetTryShowLobbyGroupInfo()
-        {
-            try
-            {
-                var response = await _client.GetAsync("/lol-lobby/v2/lobby");
-                if (!response.IsSuccessStatusCode) return null;
-
-                var content = await response.Content.ReadAsStringAsync();
-                Debug.WriteLine($"lobby阶段原始数据：{content}");
-
-                return JObject.Parse(content);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"lobby阶段数据失败: {ex}");
-                return new JObject();
             }
         }
 
@@ -539,6 +501,11 @@ namespace League.model
                 //Debug.WriteLine($"选人阶段原始数据：{content}");
 
                 return JObject.Parse(content);
+            }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
+                return new JObject();
             }
             catch (Exception ex)
             {
@@ -559,6 +526,11 @@ namespace League.model
                 //Debug.WriteLine($"游戏会话信息数据：{content}");
 
                 return JObject.Parse(content);
+            }
+            catch (TaskCanceledException ex)
+            {
+                Debug.WriteLine($"[LCU] 请求超时: {ex.Message}");
+                return new JObject();
             }
             catch (Exception ex)
             {
@@ -908,79 +880,6 @@ namespace League.model
                 return null;
             }
         }
-
-        //public async Task<Image> GetItemIconAsync(string iconPath)
-        //{
-        //    // 确保缓存目录存在
-        //    string cacheDir = Path.Combine(Application.StartupPath, "Assets", "item");
-        //    Directory.CreateDirectory(cacheDir);
-
-        //    // 从路径中提取文件名
-        //    string fileName = Path.GetFileName(iconPath);
-        //    if (string.IsNullOrEmpty(fileName))
-        //    {
-        //        Debug.WriteLine($"无效的装备图标路径: {iconPath}");
-        //        return null;
-        //    }
-
-        //    // 构建本地缓存路径
-        //    string cachePath = Path.Combine(cacheDir, fileName);
-
-        //    // 1. 首先尝试从本地缓存加载
-        //    if (File.Exists(cachePath))
-        //    {
-        //        try
-        //        {
-        //            using (var stream = File.OpenRead(cachePath))
-        //            {
-        //                var image = Image.FromStream(stream);
-        //                //Debug.WriteLine($"从本地缓存加载装备图标: {fileName}");
-        //                return (Image)image.Clone();
-        //            }
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            Debug.WriteLine($"本地缓存加载失败: {ex.Message}");
-        //            // 如果缓存文件损坏，继续从网络获取
-        //        }
-        //    }
-
-        //    // 2. 本地没有则从LCU API获取
-        //    try
-        //    {
-        //        var response = await _client.GetAsync(iconPath);
-        //        if (!response.IsSuccessStatusCode)
-        //        {
-        //            Debug.WriteLine($"装备图标获取失败: {iconPath} 状态码: {response.StatusCode}");
-        //            return null;
-        //        }
-
-        //        using (var stream = await response.Content.ReadAsStreamAsync())
-        //        {
-        //            var image = Image.FromStream(stream);
-        //            Debug.WriteLine($"成功从API读取装备图标: {fileName}");
-
-        //            // 3. 将获取的图片保存到本地缓存
-        //            try
-        //            {
-        //                await SaveItemImageToCacheAsync(image, cachePath);
-        //                Debug.WriteLine($"已缓存装备图标: {fileName}");
-        //            }
-        //            catch (Exception ex)
-        //            {
-        //                Debug.WriteLine($"装备图标缓存保存失败: {ex.Message}");
-        //                // 即使缓存失败也返回图片
-        //            }
-
-        //            return image;
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        Debug.WriteLine($"装备图标加载异常: {ex}");
-        //        return null;
-        //    }
-        //}
 
         private async Task SaveItemImageToCacheAsync(Image image, string cachePath)
         {

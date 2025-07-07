@@ -37,16 +37,16 @@
             txtGameName = new TextBox();
             label1 = new Label();
             tabPage2 = new TabPage();
+            penalGameMatchData = new Panel();
             tableLayoutPanel1 = new TableLayoutPanel();
             tabPage3 = new TabPage();
             linkLabel1 = new LinkLabel();
-            penalGameMatchData = new Panel();
             panel1.SuspendLayout();
             imageTabControl1.SuspendLayout();
             tabPage1.SuspendLayout();
             tabPage2.SuspendLayout();
-            tabPage3.SuspendLayout();
             penalGameMatchData.SuspendLayout();
+            tabPage3.SuspendLayout();
             SuspendLayout();
             // 
             // panel1
@@ -138,6 +138,15 @@
             tabPage2.TabIndex = 1;
             tabPage2.Text = "查看玩家";
             // 
+            // penalGameMatchData
+            // 
+            penalGameMatchData.Controls.Add(tableLayoutPanel1);
+            penalGameMatchData.Dock = DockStyle.Fill;
+            penalGameMatchData.Location = new Point(3, 3);
+            penalGameMatchData.Name = "penalGameMatchData";
+            penalGameMatchData.Size = new Size(1169, 794);
+            penalGameMatchData.TabIndex = 1;
+            // 
             // tableLayoutPanel1
             // 
             tableLayoutPanel1.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
@@ -175,15 +184,6 @@
             linkLabel1.TabStop = true;
             linkLabel1.Text = "等开发";
             // 
-            // penalGameMatchData
-            // 
-            penalGameMatchData.Controls.Add(tableLayoutPanel1);
-            penalGameMatchData.Dock = DockStyle.Fill;
-            penalGameMatchData.Location = new Point(3, 3);
-            penalGameMatchData.Name = "penalGameMatchData";
-            penalGameMatchData.Size = new Size(1169, 794);
-            penalGameMatchData.TabIndex = 1;
-            // 
             // FormMain
             // 
             AutoScaleDimensions = new SizeF(7F, 17F);
@@ -193,16 +193,16 @@
             Icon = (Icon)resources.GetObject("$this.Icon");
             Name = "FormMain";
             StartPosition = FormStartPosition.CenterScreen;
-            Text = "League";
+            Text = "League v1.0.1";
             Load += FormMain_Load;
             panel1.ResumeLayout(false);
             imageTabControl1.ResumeLayout(false);
             tabPage1.ResumeLayout(false);
             tabPage1.PerformLayout();
             tabPage2.ResumeLayout(false);
+            penalGameMatchData.ResumeLayout(false);
             tabPage3.ResumeLayout(false);
             tabPage3.PerformLayout();
-            penalGameMatchData.ResumeLayout(false);
             ResumeLayout(false);
         }
 
