@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics;
 
-namespace League
+namespace League.model
 {
     public class Poller
     {

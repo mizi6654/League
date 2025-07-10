@@ -16,6 +16,8 @@
         public IEnumerable<string> Matches => MatchKeys;
 
         public string PartyId { get; set; } // 加上这个字段用于判断组队身份
+
+        public List<bool> WinHistory { get; set; } = new(); // 新增: 每场 true=胜利, false=失败
     }
 
 }

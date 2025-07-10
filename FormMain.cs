@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
 using League.model;
 using League.uitls;
 using Newtonsoft.Json.Linq;
@@ -47,16 +49,16 @@ namespace League
         private int _lastIndex = -1;
 
         private readonly Poller _tab1Poller = new Poller();
-
-        //用来表示未连接LCU API功能控件
-        //Label _lblConnecting;
-        //ProgressBar _progressConnecting;
-        //private LinkLabel _linkLolPath;
-        //private Button _btnStartLol;
-
         private Panel _waitingPanel;
 
         bool _isGame = false;
+
+        private bool _champSelectMessageSent = false;   //队伍选人阶段发送消息标志
+
+        //定义两个字段，用来存储我方队伍与敌方队伍的数据
+        private JArray _cachedMyTeam;
+        private JArray _cachedEnemyTeam;
+
 
         public FormMain()
         {
@@ -137,243 +139,6 @@ namespace League
             }
         }
 
-        /// <summary>
-        /// 启动窗口，轮询监听是否登录了lcu客户端
-        /// </summary>
-        private void StartLcuConnectPolling()
-        {
-            //UI连接提示
-            SafeInvoke(panelMatchList, () =>
-            {
-                ShowLcuNotConnectedMessage(panelMatchList);
-            });
-
-            _lcuPoller.Start(async () =>
-            {
-                if (!lcuReady)
-                {
-                    bool isReady = await Globals.lcuClient.InitializeAsync();
-                    if (isReady)
-                    {
-                        lcuReady = true;
-                        _lcuPoller.Stop();
-                        Debug.WriteLine("[LCU连接成功]");
-
-                        //LCU API 连接成功之后初始化英雄资源
-                        await Globals.lcuClient.LoadChampionsAsync();   //初始化英雄数据
-                        await Globals.lcuClient.LoadItemsAsync();   //初始化装备数据
-                        await Globals.lcuClient.LoadSpellsAsync();  //初始化召唤师数据
-                        await Globals.lcuClient.LoadRunesAsync();   //初始化符文数据
-
-                        panelMatchList.Invoke(new Action(() =>
-                        {
-                            panelMatchList.Controls.Clear();
-
-                            //将用户列表控件添加到penal中
-                            _matchTabContent = new MatchTabContent();
-                            _matchTabContent.Dock = DockStyle.Fill;
-                            panelMatchList.Controls.Add(_matchTabContent);  //将用户数据显示的控件添加到penal中
-                        }));
-
-                        //初始化资源完成之后立即查询当前用户战绩
-                        this.InvokeIfRequired(async () =>
-                        {
-                            await InitializeDefaultTab();
-                        });
-
-                        //启动LCU成功之后监听房间状态
-                        StartGameflowWatcher();
-                    }
-                    else
-                    {
-                        Debug.WriteLine("[LCU检测中] 未找到 LCU 客户端");
-                    }
-                }
-            }, 5000); // 每 5 秒轮询一次
-        }
-
-
-        /// <summary>
-        /// 监听玩家进入游戏房间状态，并实时获取玩家信息
-        /// </summary>
-        private async void StartGameflowWatcher()
-        {
-            
-            if (!lcuReady)
-            {
-                return;
-            }
-
-            try
-            {
-                _watcherCts = new CancellationTokenSource();
-                var token = _watcherCts.Token;
-                string lastPhase = null;
-                string previousPhase = null;
-
-                await Task.Run(async () =>
-                {
-                    while (!token.IsCancellationRequested)
-                    {
-                        try
-                        {
-                            string phase = await Globals.lcuClient.GetGameflowPhase();
-
-                            if (string.IsNullOrEmpty(phase))
-                            {
-                                Debug.WriteLine("[LCU] 检测到 LCU 掉线");
-
-                                lcuReady = false;
-                                _isGame = false;
-                                _watcherCts?.Cancel();
-
-                                SafeInvoke(panelMatchList, () =>
-                                {
-                                    ShowLcuNotConnectedMessage(panelMatchList);
-                                });
-
-                                StartLcuConnectPolling();
-                                break;
-                            }
-
-                            if (phase != lastPhase)
-                            {
-                                Debug.WriteLine($"[Gameflow] 状态改变: {lastPhase} → {phase}");
-                                previousPhase = lastPhase;
-                                lastPhase = phase;
-
-                                switch (phase)
-                                {
-                                    case "Matchmaking":
-                                    case "ReadyCheck":
-                                        _tab1Poller.Stop();
-                                        _isGame = false;
-                                        lastChampSelectSnapshot.Clear();//存储我方队伍选择的英雄状态
-
-                                        _currentChampBySummoner.Clear();//显示卡片并缓存当前 summoner → championId
-                                        _summonerToColMap.Clear();
-
-                                        //判断是否已有缓存，如果有直接返回缓存，跳过网络查询
-                                        _cachedPlayerMatchInfos.Clear();
-
-                                        // key: summonerId, value: 缓存的对局信息
-                                        playerMatchCache.Clear();
-                                        _cardBySummonerId.Clear();
-
-                                        // 切换到选择英雄查看面板
-                                        SafeInvoke(imageTabControl1, () => 
-                                        {
-                                            ShowWaitingForGameMessage(penalGameMatchData, "正在等待加入游戏，请稍后...");
-                                            imageTabControl1.SelectedIndex = 1;
-                                        }); 
-                                        break;
-                                    case "ChampSelect":
-                                        _isGame = true; //标识是否已经进入房间
-
-                                        //清除UI
-                                        SafeInvoke(penalGameMatchData, () =>
-                                        {
-                                            if (_waitingPanel != null && penalGameMatchData.Controls.Contains(_waitingPanel))
-                                            {
-                                                penalGameMatchData.Controls.Remove(_waitingPanel);
-                                                _waitingPanel.Dispose();
-                                                _waitingPanel = null;
-                                            }
-
-                                            tableLayoutPanel1.Visible = true;
-                                            tableLayoutPanel1.Controls.Clear();
-                                        });
-
-                                        _gameEndHandled = false;
-                                        await OnChampSelectStart(); // 获取我方队伍
-                                        break;
-
-                                    case "InProgress":
-                                        _champSelectCts?.Cancel();
-                                        await ShowEnemyTeamCards(); // 获取敌方队伍
-                                        break;
-                                    case "EndOfGame":
-                                    case "PreEndOfGame":
-                                    case "WaitingForStats":
-                                    case "Lobby":
-                                    case "None":
-                                        if (!_gameEndHandled &&
-                                            (previousPhase == "InProgress" || previousPhase == "WaitingForStats" || previousPhase == "ChampSelect"))
-                                        {
-                                            _gameEndHandled = true;
-                                            await OnGameEnd(); // 只负责清缓存
-                                        }
-                                        break;
-                                }
-                            }
-                        }
-                        catch (TaskCanceledException)
-                        {
-                            Debug.WriteLine("监控任务被取消");
-                            break;
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine($"监控异常: {ex}");
-
-                            lcuReady = false;
-                            _isGame = false;
-                            _watcherCts?.Cancel();
-
-                            SafeInvoke(panelMatchList, () =>
-                            {
-                                ShowLcuNotConnectedMessage(panelMatchList);
-                            });
-
-                            StartLcuConnectPolling();
-                            break;
-                        }
-
-                        await Task.Delay(1000);
-                    }
-                }, token);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"监听异常：{ex}");
-            }
-        }
-
-        private void StopGameflowWatcher()
-        {
-            _watcherCts?.Cancel();
-        }
-
-        /// <summary>
-        /// 默认查询当前客户端玩家对战数据
-        /// </summary>
-        /// <returns></returns>
-        private async Task InitializeDefaultTab()
-        {
-            var summoner = await Globals.lcuClient.GetCurrentSummoner();
-            if (summoner == null) return;
-
-            // 根据puuid获取原始数据
-            var rankedJson = await Globals.lcuClient.GetCurrentRankedStatsAsync(summoner["puuid"].ToString());
-
-            // 直接通过类方法解析
-            var rankedStats = RankedStats.FromJson(rankedJson);
-
-            string privacyStatus = "隐藏";
-            if (summoner["privacy"]?.ToString().Equals("PUBLIC", StringComparison.OrdinalIgnoreCase) == true)
-                privacyStatus = "公开";
-            // 直接创建标签页（不再需要单独设置信息）
-            _matchTabContent.CreateNewTab(
-                summoner["gameName"].ToString(),
-                summoner["tagLine"].ToString(),
-                summoner["puuid"].ToString(),
-                summoner["profileIconId"].ToString(),
-                summoner["summonerLevel"].ToString(),
-                privacyStatus,
-                rankedStats
-            );
-        }
-
         private void ImageTabControl1_MouseMove(object sender, MouseEventArgs e)
         {
             for (int i = 0; i < imageTabControl1.TabPages.Count; i++)
@@ -441,6 +206,234 @@ namespace League
             );
         }
 
+        //初始化资源
+        private async Task InitializeLcuResources()
+        {
+            await Globals.lcuClient.LoadChampionsAsync();
+            await Globals.lcuClient.LoadItemsAsync();
+            await Globals.lcuClient.LoadSpellsAsync();
+            await Globals.lcuClient.LoadRunesAsync();
+        }
+
+        #region 软件启动，轮询检测 LCU 连接
+        /// <summary>
+        /// 启动窗口，轮询监听是否登录了lcu客户端
+        /// </summary>
+        private void StartLcuConnectPolling()
+        {
+            SetLcuUiState(false, false);
+
+            _lcuPoller.Start(async () =>
+            {
+                if (!lcuReady)
+                {
+                    bool isReady = await Globals.lcuClient.InitializeAsync();
+                    if (isReady)
+                    {
+                        lcuReady = true;
+                        _lcuPoller.Stop();
+                        Debug.WriteLine("[LCU连接成功]");
+
+                        //LCU API 连接成功之后初始化英雄资源
+                        await InitializeLcuResources();
+
+                        SafeInvoke(panelMatchList, () =>
+                        {
+                            //将用户列表控件添加到penal中
+                            panelMatchList.Controls.Clear();
+                            _matchTabContent = new MatchTabContent();
+                            _matchTabContent.Dock = DockStyle.Fill;
+                            panelMatchList.Controls.Add(_matchTabContent);
+                        });
+
+                        this.InvokeIfRequired(async () =>
+                        {
+                            //初始化资源完成之后立即查询当前用户战绩
+                            await InitializeDefaultTab();
+
+                            // 新增：检测当前 phase，确保可恢复游戏中场景
+                            string currentPhase = await Globals.lcuClient.GetGameflowPhase();
+
+                            if (!string.IsNullOrEmpty(currentPhase))
+                            {
+                                Debug.WriteLine($"[LCU检测] 当前 phase = {currentPhase}");
+                                await HandleGameflowPhase(currentPhase, previousPhase: null);
+                            }
+
+                            // 正式启动轮询
+                            StartGameflowWatcher();
+                        });
+
+                        //刷新提示UI
+                        SetLcuUiState(lcuReady, _isGame);
+                    }
+                    else
+                    {
+                        Debug.WriteLine("[LCU检测中] 未找到 LCU 客户端");
+                    }
+                }
+            }, 5000);
+        }
+
+        /// <summary>
+        /// 默认查询当前客户端玩家对战数据
+        /// </summary>
+        /// <returns></returns>
+        private async Task InitializeDefaultTab()
+        {
+            var summoner = await Globals.lcuClient.GetCurrentSummoner();
+            if (summoner == null) return;
+
+            // 根据puuid获取原始数据
+            var rankedJson = await Globals.lcuClient.GetCurrentRankedStatsAsync(summoner["puuid"].ToString());
+
+            // 直接通过类方法解析
+            var rankedStats = RankedStats.FromJson(rankedJson);
+
+            string privacyStatus = "隐藏";
+            if (summoner["privacy"]?.ToString().Equals("PUBLIC", StringComparison.OrdinalIgnoreCase) == true)
+                privacyStatus = "公开";
+            // 直接创建标签页（不再需要单独设置信息）
+            _matchTabContent.CreateNewTab(
+                summoner["gameName"].ToString(),
+                summoner["tagLine"].ToString(),
+                summoner["puuid"].ToString(),
+                summoner["profileIconId"].ToString(),
+                summoner["summonerLevel"].ToString(),
+                privacyStatus,
+                rankedStats
+            );
+        }
+
+        /// <summary>
+        /// 监听玩家进入游戏房间状态，并实时获取玩家信息
+        /// </summary>
+        private async void StartGameflowWatcher()
+        {
+            if (!lcuReady)
+            {
+                return;
+            }
+
+            try
+            {
+                _watcherCts = new CancellationTokenSource();
+                var token = _watcherCts.Token;
+                string lastPhase = null;
+                string previousPhase = null;
+
+                await Task.Run(async () =>
+                {
+                    while (!token.IsCancellationRequested)
+                    {
+                        string phase = await Globals.lcuClient.GetGameflowPhase();
+
+                        if (string.IsNullOrEmpty(phase))
+                        {
+                            //返回空，则视为掉线
+                            OnLcuDisconnected();
+                            break;
+                        }
+
+                        if (phase != lastPhase)
+                        {
+                            Debug.WriteLine($"[Gameflow] 状态改变: {lastPhase} → {phase}");
+
+                            //如果不返回空，则进入状态判断
+                            await HandleGameflowPhase(phase, lastPhase);
+                            previousPhase = lastPhase;
+                            lastPhase = phase;
+                        }
+
+                        await Task.Delay(1000);
+                    }
+
+                }, token);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"监听异常：{ex}");
+            }
+        }
+
+        //封装 phase 处理
+        private async Task HandleGameflowPhase(string phase, string previousPhase)
+        {
+            switch (phase)
+            {
+                case "Matchmaking":
+                case "ReadyCheck":
+                    _isGame = false;
+                    ClearGameState();
+                    SafeInvoke(imageTabControl1, () =>
+                    {
+                        SetLcuUiState(lcuReady, _isGame);
+                        imageTabControl1.SelectedIndex = 1;
+                    });
+
+                    //离开选人时清掉发送消息标志
+                    _champSelectMessageSent = false;
+                    break;
+
+                case "ChampSelect":
+                    _isGame = true;
+
+                    SafeInvoke(penalGameMatchData, () =>
+                    {
+                        //进入游戏选人房间，先清空前面的UI提示控件
+                        if (_waitingPanel != null && penalGameMatchData.Controls.Contains(_waitingPanel))
+                        {
+                            penalGameMatchData.Controls.Remove(_waitingPanel);
+                            _waitingPanel.Dispose();
+                            _waitingPanel = null;
+                        }
+
+                        //判断是否存在tableLayoutPanel1，不存在则添加，它是用来显示玩家战绩的控件
+                        if (!penalGameMatchData.Controls.Contains(tableLayoutPanel1))
+                        {
+                            tableLayoutPanel1.Dock = DockStyle.Fill;
+                            penalGameMatchData.Controls.Add(tableLayoutPanel1);
+                        }
+
+                        tableLayoutPanel1.Visible = true;
+                        tableLayoutPanel1.Controls.Clear();
+                    });
+
+                    _gameEndHandled = false;
+
+                    //开始获取我方队伍玩家数据
+                    await OnChampSelectStart();
+                    break;
+
+                case "InProgress":
+                    //停止我方英雄获取轮询
+                    _champSelectCts?.Cancel();
+
+                    //离开选人时清掉发送消息标志
+                    _champSelectMessageSent = false;
+
+                    //开始获取敌方队伍玩家数据
+                    await ShowEnemyTeamCards();
+                    break;
+
+                case "EndOfGame":
+                case "PreEndOfGame":
+                case "WaitingForStats":
+                case "Lobby":
+                case "None":
+                    //离开选人时清掉发送消息标志
+                    _champSelectMessageSent = false;
+
+                    if (!_gameEndHandled &&
+                        (previousPhase == "InProgress" || previousPhase == "WaitingForStats" || previousPhase == "ChampSelect"))
+                    {
+                        _gameEndHandled = true;
+                        await OnGameEnd();
+                    }
+                    break;
+            }
+        }
+
         /// <summary>
         /// 监听房间状态为：ChampSelect，显示我方英雄列表卡片
         /// </summary>
@@ -475,6 +468,55 @@ namespace League
             }, token);
         }
 
+        //封装游戏状态清理
+        private void ClearGameState()
+        {
+            lastChampSelectSnapshot.Clear();
+            _currentChampBySummoner.Clear();
+            _summonerToColMap.Clear();
+            _cachedPlayerMatchInfos.Clear();
+            playerMatchCache.Clear();
+            _cardBySummonerId.Clear();
+        }
+
+        //封装断线处理
+        private void OnLcuDisconnected()
+        {
+            lcuReady = false;
+            _isGame = false;
+
+            _watcherCts?.Cancel();
+            SetLcuUiState(false, false);
+            StartLcuConnectPolling();
+        }
+
+        //游戏结束
+        private async Task OnGameEnd()
+        {
+            Debug.WriteLine("游戏已结束，正在清空缓存及队伍存储信息，重置UI");
+
+            // key: summonerId, value: 缓存的对局信息
+            playerMatchCache.Clear();
+            playerCache.Clear();
+
+            _champSelectCts?.Cancel();  //清空房间状态内部轮询任务
+            lastChampSelectSnapshot.Clear();    //清空存储我方队伍选择的英雄状态
+
+
+            this.InvokeIfRequired(async () =>
+            {
+                Debug.WriteLine("即将重置主 Tab 页内容...");
+                await InitializeDefaultTab();
+            });
+
+        }
+
+        private void StopGameflowWatcher()
+        {
+            _watcherCts?.Cancel();
+        }
+        #endregion
+
         #region 并行下载查询战绩，先显示头像，后显示战绩
         private async Task CreateBasicCardsOnly(JArray team, bool isMyTeam, int row)
         {
@@ -490,7 +532,7 @@ namespace League
                 if (_currentChampBySummoner.TryGetValue(summonerId, out int prevChampId) && prevChampId == championId)
                 {
                     _summonerToColMap[summonerId] = col++;
-                    Debug.WriteLine($"[CreateBasicCardsOnly] summonerId={summonerId} 英雄未变，跳过头像加载，col={col - 1}");
+                    //Debug.WriteLine($"[CreateBasicCardsOnly] summonerId={summonerId} 英雄未变，跳过头像加载，col={col - 1}");
                     continue;
                 }
 
@@ -520,7 +562,7 @@ namespace League
                     HeroIcons = new ImageList()
                 };
 
-                Debug.WriteLine($"[CreateBasicCardsOnly] 创建卡片 summonerId={summonerId}, championId={championId}, col={col}");
+                //Debug.WriteLine($"[CreateBasicCardsOnly] 创建卡片 summonerId={summonerId}, championId={championId}, col={col}");
                 UpdateOrCreateLoadingPlayerMatch(matchInfo, isMyTeam, row, col);
 
                 col++;
@@ -547,7 +589,7 @@ namespace League
                     {
                         if (_cachedPlayerMatchInfos.TryGetValue(sid, out info))
                         {
-                            Debug.WriteLine($"[使用缓存] summonerId={sid}");
+                            //Debug.WriteLine($"[使用缓存] summonerId={sid}");
 
                             if (_currentChampBySummoner.TryGetValue(sid, out int current) && current == cid)
                             {
@@ -635,7 +677,7 @@ namespace League
 
         private async Task ShowMyTeamCards()
         {
-            Debug.WriteLine("[ShowMyTeamCards] 获取选人会话中...");
+            //Debug.WriteLine("[ShowMyTeamCards] 获取选人会话中...");
             var session = await Globals.lcuClient.GetChampSelectSession();
             if (session == null)
             {
@@ -652,7 +694,7 @@ namespace League
 
             myTeamId = (int)myTeam[0]["team"];
             int row = myTeamId - 1;
-            Debug.WriteLine($"[ShowMyTeamCards] 我的队伍 teamId={myTeamId}, row={row}");
+            //Debug.WriteLine($"[ShowMyTeamCards] 我的队伍 teamId={myTeamId}, row={row}");
 
             // 生成当前快照
             var currentSnapshot = new List<string>();
@@ -666,20 +708,105 @@ namespace League
             // 比较快照，若一致则不更新
             if (lastChampSelectSnapshot.SequenceEqual(currentSnapshot))
             {
-                Debug.WriteLine("[ShowMyTeamCards] 队伍未变化，跳过刷新");
+                //Debug.WriteLine("[ShowMyTeamCards] 队伍未变化，跳过刷新");
                 return;
             }
 
             // 保存快照
             lastChampSelectSnapshot = currentSnapshot;
 
-            Debug.WriteLine("[ShowMyTeamCards] 队伍变化，开始刷新");
+            //Debug.WriteLine("[ShowMyTeamCards] 队伍变化，开始刷新");
+
+            //将我方数据存储
+            _cachedMyTeam = myTeam;
 
             // 刷新 UI 和战绩
             await CreateBasicCardsOnly(myTeam, isMyTeam: true, row: row);
-            _ = FillPlayerMatchInfoAsync(myTeam, isMyTeam: true, row: row);
+            //_ = FillPlayerMatchInfoAsync(myTeam, isMyTeam: true, row: row);
+            await FillPlayerMatchInfoAsync(myTeam, isMyTeam: true, row: row);
+
+            // 启动热键监听
+            if (!_champSelectMessageSent)
+            {
+                ListenAndSendMessageWhenHotkeyPressed(myTeam);
+                _champSelectMessageSent = true;
+            }
         }
 
+        // 声明 Win32 API
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(Keys vKey);
+
+        private void ListenAndSendMessageWhenHotkeyPressed(JArray myTeam)
+        {
+            Task.Run(() =>
+            {
+                Debug.WriteLine("[HotKey] 等待用户按下快捷键 F9...");
+
+                while (true)
+                {
+                    // 检测是否按下 F9
+                    if ((GetAsyncKeyState(Keys.F9) & 0x8000) != 0)
+                    {
+                        Debug.WriteLine("[HotKey] 检测到 F9 被按下！");
+                        SendChampSelectSummaryViaSendKeys(myTeam);
+                        break;
+                    }
+
+                    Thread.Sleep(100);
+                }
+            });
+        }
+
+        /// <summary>
+        /// 发送我方队伍数据到选人聊天窗口
+        /// </summary>
+        private void SendChampSelectSummaryViaSendKeys(JArray myTeam)
+        {
+            var sb = new StringBuilder();
+
+            foreach (var p in myTeam)
+            {
+                long summonerId = (long)p["summonerId"];
+                if (!_cachedPlayerMatchInfos.TryGetValue(summonerId, out var info))
+                {
+                    Debug.WriteLine($"[SendChampSelectChatMessage] 未找到 summonerId={summonerId} 的缓存数据");
+                    continue;
+                }
+
+                string name = info.Player.GameName ?? "未知玩家";
+                string solo = info.Player.SoloRank ?? "未知";
+                string flex = info.Player.FlexRank ?? "未知";
+
+                var wins = info.WinHistory.Count(w => w);
+                var total = info.WinHistory.Count;
+                double winRate = total > 0 ? (wins * 100.0 / total) : 0;
+                
+                sb.AppendLine($"{name}: 单双排 {solo} | 灵活 {flex} | 近20场胜率: {winRate:F1}%");
+            }
+
+            string message = sb.ToString().Trim();
+            if (string.IsNullOrEmpty(message))
+            {
+                Debug.WriteLine("[SendChampSelectChatMessage] 没有任何可发送的消息内容");
+                return;
+            }
+
+            Debug.WriteLine("[SendChampSelectChatMessage] 开始通过 SendKeys 发送消息");
+
+            // 必须先把聊天框点开
+            SendKeys.SendWait("{ENTER}");
+            Thread.Sleep(100);
+
+            foreach (var line in message.Split(new[] { Environment.NewLine }, StringSplitOptions.None))
+            {
+                SendKeys.SendWait(line);
+                //Debug.WriteLine($"战绩信息：{line}");
+                SendKeys.SendWait("{ENTER}");
+                Thread.Sleep(50);
+            }
+            Debug.WriteLine("[战绩信息] SendKeys 发送结束");
+        }
 
         private async Task ShowEnemyTeamCards()
         {
@@ -702,11 +829,15 @@ namespace League
                 var enemyTeam = isInTeamOne ? teamTwo : teamOne;
                 int enemyRow = isInTeamOne ? 1 : 0;
 
+                //将敌方数据存储
+                _cachedEnemyTeam = enemyTeam;
+
                 // 先创建头像占位卡片
                 await CreateBasicCardsOnly(enemyTeam, isMyTeam: false, row: enemyRow);
 
                 // 再异步补充段位/战绩
-                _ = FillPlayerMatchInfoAsync(enemyTeam, isMyTeam: false, row: enemyRow);
+                //_ = FillPlayerMatchInfoAsync(enemyTeam, isMyTeam: false, row: enemyRow);
+                await FillPlayerMatchInfoAsync(enemyTeam, isMyTeam: false, row: enemyRow);
             }
             catch (Exception ex)
             {
@@ -925,6 +1056,9 @@ namespace League
                 int assists = stats?["assists"]?.Value<int>() ?? 0;
                 bool win = stats?["win"]?.Value<bool>() ?? false;
 
+                // 新增
+                result.WinHistory.Add(win);
+
                 string gameMode = GameMod.GetModeName(
                         match["queueId"]?.Value<int>() ?? -1,
                         match["gameMode"]?.ToString()
@@ -1130,30 +1264,7 @@ namespace League
         }
         #endregion
 
-
-
-        //游戏结束
-        private async Task OnGameEnd()
-        {
-            Debug.WriteLine("游戏已结束，正在清空缓存及队伍存储信息，重置UI");
-
-            // key: summonerId, value: 缓存的对局信息
-            playerMatchCache.Clear();
-            playerCache.Clear();
-
-            _champSelectCts?.Cancel();  //清空房间状态内部轮询任务
-            lastChampSelectSnapshot.Clear();    //清空存储我方队伍选择的英雄状态
-
-
-            this.InvokeIfRequired(async () =>
-            {
-                Debug.WriteLine("即将重置主 Tab 页内容...");
-                await InitializeDefaultTab();
-            });
-
-        }
-
-
+        #region 查询战绩与解析
         /// <summary>
         /// 查询数据
         /// </summary>
@@ -1240,11 +1351,33 @@ namespace League
                 MessageBox.Show($"查询失败: {ex.Message}");
             }
         }
+        #endregion
 
-        private void ShowLcuNotConnectedMessage(Control parentControl)
+        #region LCU 检测连接提示
+        private void SetLcuUiState(bool connected, bool inGame)
         {
-            parentControl.Controls.Clear();
+            if (!connected)
+            {
+                SafeInvoke(panelMatchList, () =>
+                {
+                    ShowLcuNotConnectedMessage(panelMatchList);
+                });
+                SafeInvoke(penalGameMatchData, () =>
+                {
+                    ShowLcuNotConnectedMessage(penalGameMatchData);
+                });
+            }
+            else if (!_isGame)
+            {
+                SafeInvoke(penalGameMatchData, () =>
+                {
+                    ShowWaitingForGameMessage(penalGameMatchData);
+                });
+            }
+        }
 
+        private Panel CreateStatusPanel(string message, bool showLolLauncher = false)
+        {
             var containerPanel = new Panel
             {
                 Width = 500,
@@ -1254,7 +1387,7 @@ namespace League
 
             var label = new Label
             {
-                Text = "正在检测LCU连接，请确保登录了游戏...",
+                Text = message,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Dock = DockStyle.Top,
                 Height = 50,
@@ -1275,112 +1408,89 @@ namespace League
             containerPanel.Controls.Add(label);
             containerPanel.Controls.Add(progress);
 
-            LOLHelper helper = new LOLHelper();
-            string exePath = helper.GetLOLLoginExePath();
-
-            var linkLolPath = new LinkLabel
+            if (showLolLauncher)
             {
-                AutoSize = true,
-                Text = string.IsNullOrEmpty(exePath) ? "未检测到 LOL 登录程序" : exePath,
-                Font = new Font("微软雅黑", 10, FontStyle.Regular)
-            };
+                LOLHelper helper = new LOLHelper();
+                string exePath = helper.GetLOLLoginExePath();
 
-            var btnStartLol = new Button
-            {
-                Text = "启动LOL登录程序",
-                Width = 200,
-                Height = 30
-            };
-
-            linkLolPath.Left = (containerPanel.Width - linkLolPath.PreferredWidth) / 2;
-            linkLolPath.Top = progress.Bottom + 30;
-
-            btnStartLol.Left = (containerPanel.Width - btnStartLol.Width) / 2;
-            btnStartLol.Top = linkLolPath.Bottom + 10;
-
-            containerPanel.Controls.Add(linkLolPath);
-            containerPanel.Controls.Add(btnStartLol);
-
-            if (!string.IsNullOrEmpty(exePath))
-            {
-                linkLolPath.LinkClicked += (s, e) =>
+                var linkLolPath = new LinkLabel
                 {
-                    string path = exePath;
-                    if (!string.IsNullOrEmpty(path))
+                    AutoSize = true,
+                    Text = string.IsNullOrEmpty(exePath) ? "未检测到 LOL 登录程序" : exePath,
+                    Font = new Font("微软雅黑", 10, FontStyle.Regular)
+                };
+
+                var btnStartLol = new Button
+                {
+                    Text = "启动LOL登录程序",
+                    Width = 200,
+                    Height = 30
+                };
+
+                linkLolPath.Left = (containerPanel.Width - linkLolPath.PreferredWidth) / 2;
+                linkLolPath.Top = progress.Bottom + 30;
+
+                btnStartLol.Left = (containerPanel.Width - btnStartLol.Width) / 2;
+                btnStartLol.Top = linkLolPath.Bottom + 10;
+
+                containerPanel.Controls.Add(linkLolPath);
+                containerPanel.Controls.Add(btnStartLol);
+
+                if (!string.IsNullOrEmpty(exePath))
+                {
+                    linkLolPath.LinkClicked += (s, e) =>
                     {
-                        string folder = Path.GetDirectoryName(path);
+                        string folder = Path.GetDirectoryName(exePath);
                         if (Directory.Exists(folder))
                         {
                             Process.Start("explorer.exe", folder);
                         }
-                    }
-                };
+                    };
 
-                btnStartLol.Click += (sender, e) =>
-                {
-                    string path = exePath;
-                    linkLolPath.Text = path;
-
-                    if (!string.IsNullOrEmpty(path))
+                    btnStartLol.Click += (sender, e) =>
                     {
-                        Debug.WriteLine("找到 LOL 登录程序：" + path);
-                        helper.StartLOLLoginProgram(path);
-                    }
-                    else
-                    {
-                        Debug.WriteLine("未检测到 LOL 登录程序！");
-                    }
-                };
+                        linkLolPath.Text = exePath;
+                        if (!string.IsNullOrEmpty(exePath))
+                        {
+                            Debug.WriteLine("找到 LOL 登录程序：" + exePath);
+                            helper.StartLOLLoginProgram(exePath);
+                        }
+                        else
+                        {
+                            Debug.WriteLine("未检测到 LOL 登录程序！");
+                        }
+                    };
+                }
             }
 
-            containerPanel.Left = (parentControl.Width - containerPanel.Width) / 2;
-            containerPanel.Top = (parentControl.Height - containerPanel.Height) / 2;
-            containerPanel.Anchor = AnchorStyles.None;
-
-            parentControl.Controls.Add(containerPanel);
+            return containerPanel;
         }
 
-        private void ShowWaitingForGameMessage(Control parentControl, string msg)
+
+        private void ShowLcuNotConnectedMessage(Control parentControl)
         {
+            parentControl.Controls.Clear();
+
+            var panel = CreateStatusPanel(
+                "正在检测LCU连接，请确保登录了游戏...",
+                showLolLauncher: true
+            );
+
+            panel.Left = (parentControl.Width - panel.Width) / 2;
+            panel.Top = (parentControl.Height - panel.Height) / 2;
+            panel.Anchor = AnchorStyles.None;
+
+            parentControl.Controls.Add(panel);
+        }
+
+
+        private void ShowWaitingForGameMessage(Control parentControl)
+        {
+            parentControl.Controls.Clear();   // 新增：清理所有旧控件
+
             tableLayoutPanel1.Visible = false;
 
-            // 先移除旧提示
-            if (_waitingPanel != null && parentControl.Controls.Contains(_waitingPanel))
-            {
-                parentControl.Controls.Remove(_waitingPanel);
-                _waitingPanel.Dispose();
-                _waitingPanel = null;
-            }
-
-            _waitingPanel = new Panel
-            {
-                Width = 500,
-                Height = 200,
-                BackColor = Color.Transparent
-            };
-
-            var label = new Label
-            {
-                Text = msg,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.Top,
-                Height = 50,
-                Font = new Font("微软雅黑", 12, FontStyle.Bold)
-            };
-
-            var progress = new ProgressBar
-            {
-                Style = ProgressBarStyle.Marquee,
-                Width = 200,
-                Height = 30,
-                MarqueeAnimationSpeed = 30
-            };
-
-            progress.Left = (_waitingPanel.Width - progress.Width) / 2;
-            progress.Top = label.Bottom + 10;
-
-            _waitingPanel.Controls.Add(label);
-            _waitingPanel.Controls.Add(progress);
+            _waitingPanel = CreateStatusPanel("正在等待加入游戏，请稍后...", showLolLauncher: false);
 
             _waitingPanel.Left = (parentControl.Width - _waitingPanel.Width) / 2;
             _waitingPanel.Top = (parentControl.Height - _waitingPanel.Height) / 2;
@@ -1388,7 +1498,6 @@ namespace League
 
             parentControl.Controls.Add(_waitingPanel);
         }
-
 
         private void imageTabControl1_SelectedIndexChanged(object sender, EventArgs e)
         {
@@ -1413,30 +1522,23 @@ namespace League
 
         private void StartTab1Polling()
         {
-            _tab1Poller.Start(() =>
+            _tab1Poller.Start(async () =>
             {
-                if (!lcuReady)
+                try
                 {
-                    SafeInvoke(penalGameMatchData, () =>
-                    {
-                        ShowLcuNotConnectedMessage(penalGameMatchData);
-                    });
+                    SetLcuUiState(lcuReady, _isGame);
                 }
-                else if (!_isGame)
+                catch (TaskCanceledException)
                 {
-                    SafeInvoke(penalGameMatchData, () =>
-                    {
-                        ShowWaitingForGameMessage(
-                            penalGameMatchData,
-                            "正在等待加入游戏，请稍后...");
-                    });
+                    // 忽略
                 }
-                // else 在房间，由 Watcher 刷新 UI
-
-                return Task.CompletedTask;
-
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Tab1Poller轮询异常: {ex}");
+                }
             }, 3000);
         }
 
+        #endregion
     }
 }

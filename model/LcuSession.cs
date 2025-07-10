@@ -488,7 +488,6 @@ namespace League.model
             }
         }
 
-
         // 获取选人阶段会话详情
         public async Task<JObject> GetChampSelectSession()
         {
