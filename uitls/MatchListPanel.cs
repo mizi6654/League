@@ -1,4 +1,5 @@
-﻿using League.model;
+﻿using System.Diagnostics;
+using League.model;
 
 namespace League
 {
@@ -99,6 +100,7 @@ namespace League
             g.DrawString(MatchInfo.DurationText, primaryFont, Brushes.DimGray, Padding, durationY);
             g.DrawString(MatchInfo.GameTime, primaryFont, Brushes.DimGray, Padding + 130, durationY);
 
+            // 绘制英雄头像
             g.DrawImage(MatchInfo.HeroIcon, iconX, Padding, IconSize, IconSize);
 
             var modeX = iconX + IconSize + Padding;

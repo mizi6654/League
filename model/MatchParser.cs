@@ -89,6 +89,7 @@ namespace League.model
                 string goldText = $"{goldEarned / 1000f:0.#}K |{goldRank}";
                 string kpTextWithRank = $"{kpText} |{kpRank}";
 
+
                 // 并行加载所有资源
                 var championTask = LoadWithSemaphore(() =>
                     Globals.lcuClient.GetChampionInfoAsync(selfParticipant["championId"].Value<int>()));
@@ -110,6 +111,9 @@ namespace League.model
                 var (spellImg2, spellName2, spellDesc2) = await spell2Task;
                 var (primary, secondary) = await runesTask;
                 var items = await itemsTask;
+
+                // 提取当前玩家 puuid
+                string selfPuuid = selfParticipant["puuid"]?.Value<string>() ?? "";
 
                 // 构建比赛信息对象
                 var match = new MatchInfo
