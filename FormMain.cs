@@ -284,6 +284,8 @@ namespace League
             var summoner = await Globals.lcuClient.GetCurrentSummoner();
             if (summoner == null) return;
 
+            Globals.CurrentPuuid = summoner["puuid"].ToString();
+
             // 根据puuid获取原始数据
             var rankedJson = await Globals.lcuClient.GetCurrentRankedStatsAsync(summoner["puuid"].ToString());
 
@@ -745,11 +747,16 @@ namespace League
 
                 while (true)
                 {
-                    // 检测是否按下 F9
                     if ((GetAsyncKeyState(Keys.F9) & 0x8000) != 0)
                     {
                         Debug.WriteLine("[HotKey] 检测到 F9 被按下！");
-                        SendChampSelectSummaryViaSendKeys(myTeam);
+
+                        // 切回 UI 线程（保证 STA）
+                        this.Invoke((MethodInvoker)(() =>
+                        {
+                            SendChampSelectSummaryViaSendKeys(myTeam);
+                        }));
+
                         break;
                     }
 
@@ -757,6 +764,7 @@ namespace League
                 }
             });
         }
+
 
         /// <summary>
         /// 发送我方队伍数据到选人聊天窗口
@@ -770,42 +778,69 @@ namespace League
                 long summonerId = (long)p["summonerId"];
                 if (!_cachedPlayerMatchInfos.TryGetValue(summonerId, out var info))
                 {
-                    Debug.WriteLine($"[SendChampSelectChatMessage] 未找到 summonerId={summonerId} 的缓存数据");
                     continue;
                 }
 
-                string name = info.Player.GameName ?? "未知玩家";
+                //获取当前的puuid
+                string puuid = (string)p["puuid"];
+                //判断是否与窗口加载时的puuid一样，一样则是自己的，路过不发送
+                if (!string.IsNullOrEmpty(puuid) && string.Equals(puuid, Globals.CurrentPuuid, StringComparison.OrdinalIgnoreCase))
+                {
+                    Debug.WriteLine($"[跳过发送] 当前玩家:{p["gameName"].ToString()}");
+                    continue;
+                }
+
+                string name = info.Player.GameName ?? "未知";
                 string solo = info.Player.SoloRank ?? "未知";
                 string flex = info.Player.FlexRank ?? "未知";
 
                 var wins = info.WinHistory.Count(w => w);
                 var total = info.WinHistory.Count;
                 double winRate = total > 0 ? (wins * 100.0 / total) : 0;
-                
-                sb.AppendLine($"{name}: 单双排 {solo} | 灵活 {flex} | 近20场胜率: {winRate:F1}%");
+
+                //sb.AppendLine($"{name}: 单双排 {solo} | 灵活 {flex} | 近20场胜率: {winRate:F1}%");
+
+                // 拼接近10场 KDA
+                string kdaString = "";
+                if (info.RecentMatches != null && info.RecentMatches.Count > 0)
+                {
+                    var last10 = info.RecentMatches.Take(10);
+                    var kdaList = last10
+                        .Select(m => $"{m.Kills}/{m.Deaths}/{m.Assists}");
+                    kdaString = string.Join(" ", kdaList);
+                }
+                else
+                {
+                    kdaString = "无记录";
+                }
+
+                sb.AppendLine($"{name}: 单双排 {solo} | 灵活 {flex} | 近20场胜率: {winRate:F1}% | 近10场KDA: {kdaString}");
             }
 
-            string message = sb.ToString().Trim();
-            if (string.IsNullOrEmpty(message))
+            string allMessage = sb.ToString().Trim();
+            var lines = allMessage.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
+
+            foreach (var line in lines)
             {
-                Debug.WriteLine("[SendChampSelectChatMessage] 没有任何可发送的消息内容");
-                return;
-            }
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
 
-            Debug.WriteLine("[SendChampSelectChatMessage] 开始通过 SendKeys 发送消息");
+                Clipboard.SetText(line);
 
-            // 必须先把聊天框点开
-            SendKeys.SendWait("{ENTER}");
-            Thread.Sleep(100);
-
-            foreach (var line in message.Split(new[] { Environment.NewLine }, StringSplitOptions.None))
-            {
-                SendKeys.SendWait(line);
-                //Debug.WriteLine($"战绩信息：{line}");
+                // 打开聊天框
                 SendKeys.SendWait("{ENTER}");
                 Thread.Sleep(50);
+
+                // 粘贴
+                SendKeys.SendWait("^v");
+                Thread.Sleep(50);
+
+                // 回车发送
+                SendKeys.SendWait("{ENTER}");
+                Thread.Sleep(100);
             }
-            Debug.WriteLine("[战绩信息] SendKeys 发送结束");
+
+            Debug.WriteLine("[战绩信息] SendKeys 发送完成 (逐行发送)");
         }
 
         private async Task ShowEnemyTeamCards()
@@ -1055,6 +1090,14 @@ namespace League
                 int deaths = stats?["deaths"]?.Value<int>() ?? 0;
                 int assists = stats?["assists"]?.Value<int>() ?? 0;
                 bool win = stats?["win"]?.Value<bool>() ?? false;
+
+                // 保存到 RecentMatches 用来发送kda信息
+                result.RecentMatches.Add(new MatchStat
+                {
+                    Kills = kills,
+                    Deaths = deaths,
+                    Assists = assists
+                });
 
                 // 新增
                 result.WinHistory.Add(win);
